@@ -104,9 +104,10 @@
   (:default-initargs
    :name :jsonrpc
    :redraw-after-modifying-floating-window t
-   :window-left-margin 1
+   :window-left-margin 0
    :html-support t
-   :underline-color-support t))
+   :underline-color-support t
+   :no-force-needed t))
 
 (defun get-all-views ()
   (if (null (lem:current-frame))
@@ -168,7 +169,6 @@
     (handle-login jsonrpc logged-in-callback params)))
 
 (defun redraw (args)
-  (log:info "redraw: ~A" (pretty-json args))
   (with-error-handler ()
     (let ((size (and args (gethash "size" args))))
       (when size
@@ -679,7 +679,8 @@
                     (mode (lem:ensure-mode-object
                            (lem:current-major-mode-at-point
                             (lem:current-point)))))
-                (lem:paste-using-mode mode text)))))
+                (when text
+                  (lem:paste-using-mode mode text))))))
           ("mousedown"
            (let ((x (gethash "x" value))
                  (y (gethash "y" value))

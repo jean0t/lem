@@ -355,7 +355,8 @@ window width is changed, we must recalc the window view point."
   (assert (not (eq current-window new-window)))
   (window-set-size current-window
                    (window-width current-window)
-                   (window-height current-window))
+                   (window-height current-window)
+                   :update-even-if-same-size t)
   (move-point (window-view-point new-window)
               (window-view-point current-window))
   (move-point (%window-point new-window)
@@ -475,6 +476,8 @@ You can pass in the optional argument WINDOW-LIST to replace the default
 
 (defun window-set-pos (window x y)
   "Make point value in WINDOW be at position X and Y in WINDOW’s buffer."
+  (when (and (= x (window-x window)) (= y (window-y window)))
+    (return-from window-set-pos))
   (notify-frame-redisplay-required (current-frame))
   (when (floating-window-p window)
     (notify-floating-window-modified (current-frame)))
@@ -493,10 +496,14 @@ You can pass in the optional argument WINDOW-LIST to replace the default
 (defun valid-window-width-p (width)
   (< 2 width))
 
-(defun window-set-size (window width height)
+(defun window-set-size (window width height &key update-even-if-same-size)
   "Resize WINDOW to the same WIDTH and HEIGHT."
   (assert (valid-window-width-p width))
   (assert (valid-window-height-p height))
+  (unless update-even-if-same-size
+    (when (and (= width (window-width window))
+               (= height (window-height window)))
+      (return-from window-set-size)))
   (notify-frame-redisplay-required (current-frame))
   (when (floating-window-p window)
     (notify-floating-window-modified (current-frame)))

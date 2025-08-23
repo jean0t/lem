@@ -36,7 +36,9 @@
                #+sbcl
                sb-concurrency
                "lem-mailbox"
-               "lem-extension-manager")
+               "lem-extension-manager"
+               #+sbcl
+               "sb-sprof")
   :pathname "src"
   :serial t
   :components ((:module "common"
@@ -136,6 +138,7 @@
                (:file "command-advices")
                (:file "interface")
                (:file "highlight-line")
+               (:file "syntax-scanner")
                (:file "html-buffer")
                (:file "site-init")
                (:file "command-line-arguments")
@@ -159,7 +162,8 @@
                              (:file "help")
                              (:file "font")
                              (:file "other" :depends-on ("file"))
-                             (:file "frame")))
+                             (:file "frame")
+                             #+sbcl (:file "sprof")))
 
                (:module "display"
                 :serial t

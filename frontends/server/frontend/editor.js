@@ -90,7 +90,7 @@ function getLemEditorElement() {
   return document.getElementById('lem-editor');
 }
 
-function addMouseEventListeners({dom, editor, isDraggable, draggableStyle}) {
+function addMouseEventListeners({ dom, editor, isDraggable, draggableStyle }) {
   dom.addEventListener('contextmenu', (event) => {
     event.preventDefault();
   });
@@ -190,6 +190,7 @@ function addMouseEventListeners({dom, editor, isDraggable, draggableStyle}) {
 const zIndexTable = {
   'floating-window': 200,
   'modeline': 100,
+  'vertical-border': 100,
 };
 
 function zindex(type) {
@@ -283,7 +284,7 @@ class CanvasSurface extends BaseSurface {
 
     this.drawingQueue = [];
 
-    addMouseEventListeners({dom:canvas, editor});
+    addMouseEventListeners({ dom: canvas, editor });
   }
 
   setupCanvas(styles) {
@@ -452,13 +453,14 @@ class VerticalBorder {
     this.line.className = 'lem-editor__vertical-border';
     this.line.style.height = height * option.fontHeight + 'px';
     this.line.style.position = 'absolute';
+    this.line.style.zIndex = zindex('vertical-border');
 
     getLemEditorElement().appendChild(this.line);
 
     this.move(x, y);
 
     addMouseEventListeners({
-      dom:this.line,
+      dom: this.line,
       editor,
       isDraggable: true,
       draggableStyle: 'col-resize',
@@ -744,8 +746,7 @@ class View {
 
 function isPasteKeyEvent(event) {
   if (isMacOS()) {
-    // TODO
-    return false;
+    return (event.metaKey && event.key === 'v');
   } else {
     return (event.ctrlKey && event.shiftKey && event.key === 'V');
   }
@@ -782,105 +783,118 @@ class Input {
     this.input.style.font = option.font;
 
     this.input.addEventListener('blur', (event) => {
-      if (this.editor.inputEnabled) {
-        this.input.focus();
-      }
+      this.input.focus();
     });
 
     this.input.addEventListener('input', (event) => {
       //console.log('input', event);
-      if (this.editor.inputEnabled) {
-        if (this.composition === false) {
-          this.input.value = '';
-          this.span.innerHTML = '';
-          this.input.style.width = '0';
-          if (!isMacOS()) {
-            this.editor.emitInputString(event.data);
-          }
-          //console.log('>>> input', event.data);
+      if (this.composition === false) {
+        this.input.value = '';
+        this.span.innerHTML = '';
+        this.input.style.width = '0';
+        if (!isMacOS()) {
+          this.editor.emitInputString(event.data);
         }
+        //console.log('>>> input', event.data);
       }
     });
 
-    this.input.addEventListener('keydown', (event) => {
-      //console.log('keydown', event, event.isComposing, this.composition);
-      if (this.editor.inputEnabled) {
+    this.input.addEventListener('paste', async (event) => {
+      event.preventDefault(); // Block only the native insertion
+      const cd = event.clipboardData || window.Clipboard.data;
+      const textFromEvent = cd?.getData('text') ?? cd?.getData('text/plain');
 
-        if (isPasteKeyEvent(event)) {
-          this.editor.jsonrpc.notify('input', { kind: 'clipboard-paste' });
-          return;
-        }
+      if (textFromEvent && textFromEvent.length > 0) {
+        this.editor.emitInputString(textFromEvent);
+        return;
+      }
 
-        if (event.isComposing || this.composition) {
-          return;
-        }
-
-        // IMEに変換を指示する値はlemに渡すと誤作動するのでreturnする
-        if (event.key === 'Process') {
-          return;
-        }
-
-        if (this.ignoreKeydownAfterCompositionend && isSafari) {
-          // safariではIMの入力中にバックスペースやエンターキーの入力によってcompositionendイベントが来ると
-          // その後にkeydownイベントが即座に来る
-          // それを処理してしまうと余分に改行されたり文字が消えるので無視する
-          event.preventDefault();
-          this.ignoreKeydownAfterCompositionend = false;
-          return;
-        }
-
-        if (!isMacOS()) {
-          // 修飾キーなしで、ReturnやBackspaceではなく'a'などの入力であるか(event.key.length === 1)
-          if (!event.ctrlKey && !event.altKey && event.key.length === 1) {
-            // そうであれば'input' eventが受け取れるようにここでreturnする
+      // Fallback: Clipboard API (requires HTTPS/localhost & focus)
+      try {
+        if (navigator.clipboard?.readText) {
+          const text = await navigator.clipboard.readText();
+          if (text && text.length > 0) {
+            this.editor.emitInputString(text);
             return;
           }
         }
+      } catch (e) {
+        console.warn('clipboard.readText() failed:', e);
+      }
 
+      alert("Paste failed (permission/environment restriction");
+    });
+
+    this.input.addEventListener('keydown', (event) => {
+      if (isPasteKeyEvent(event)) {
+        // Do nothing here (do not call preventDefault)
+        // Let the browser fire the paste event
+        return;
+      }
+
+      if (event.isComposing || this.composition) {
+        return;
+      }
+
+      // IMEに変換を指示する値はlemに渡すと誤作動するのでreturnする
+      if (event.key === 'Process') {
+        return;
+      }
+
+      if (this.ignoreKeydownAfterCompositionend && isSafari) {
+        // safariではIMの入力中にバックスペースやエンターキーの入力によってcompositionendイベントが来ると
+        // その後にkeydownイベントが即座に来る
+        // それを処理してしまうと余分に改行されたり文字が消えるので無視する
         event.preventDefault();
+        this.ignoreKeydownAfterCompositionend = false;
+        return;
+      }
 
-        if (event.isComposing !== true && event.code !== '') {
-          // mac/chromium系のブラウザで"あ"と入力すると、
-          // keydownの後にcompositionstartが来るので、
-          // それを逆転するためにsetTimeoutを使う
-          setTimeout(() => {
-            if (!this.composition) {
-              this.editor.emitInput(event);
-              this.input.value = '';
-            }
-          }, 0);
-          return false;
+      if (!isMacOS()) {
+        // 修飾キーなしで、ReturnやBackspaceではなく'a'などの入力であるか(event.key.length === 1)
+        if (!event.ctrlKey && !event.altKey && event.key.length === 1) {
+          // そうであれば'input' eventが受け取れるようにここでreturnする
+          return;
         }
+      }
+
+      event.preventDefault();
+
+      if (event.isComposing !== true && event.code !== '') {
+        // mac/chromium系のブラウザで"あ"と入力すると、
+        // keydownの後にcompositionstartが来るので、
+        // それを逆転するためにsetTimeoutを使う
+        setTimeout(() => {
+          if (!this.composition) {
+            this.editor.emitInput(event);
+            this.input.value = '';
+          }
+        }, 0);
+        return false;
       }
     });
 
     this.input.addEventListener('compositionstart', (event) => {
       //console.log('compositionstart', event);
-      if (this.editor.inputEnabled) {
-        this.composition = true;
-        this.span.innerHTML = this.input.value;
-        this.input.style.width = this.span.offsetWidth + 'px';
-      }
+      this.composition = true;
+      this.span.innerHTML = this.input.value;
+      this.input.style.width = this.span.offsetWidth + 'px';
     });
 
     this.input.addEventListener('compositionupdate', (event) => {
       //console.log('compositionupdate', event);
-      if (this.editor.inputEnabled) {
-        this.span.innerHTML = event.data;
-        this.input.style.width = this.span.offsetWidth + 'px';
-      }
+      this.span.innerHTML = event.data;
+      this.input.style.width = this.span.offsetWidth + 'px';
     });
 
     this.input.addEventListener('compositionend', (event) => {
       //console.log('compositionend', event);
-      if (this.editor.inputEnabled) {
-        this.composition = false;
-        this.editor.emitInputString(this.input.value);
-        this.input.value = '';
-        this.span.innerHTML = this.input.value;
-        this.input.style.width = '0';
-        this.ignoreKeydownAfterCompositionend = true;
-      }
+      this.composition = false;
+      this.editor.emitInputString(this.input.value);
+      this.input.value = '';
+      this.span.innerHTML = this.input.value;
+      this.input.style.width = '0';
+      this.ignoreKeydownAfterCompositionend = true;
     });
 
     document.body.appendChild(this.input);
@@ -946,7 +960,6 @@ export class Editor {
     this.option = new Option({ fontName, fontSize });
 
     this.onExit = onExit;
-    this.inputEnabled = true;
 
     this.input = new Input(this);
     this.cursors = new Map();
@@ -1043,7 +1056,7 @@ export class Editor {
   focusHiddenInput() {
     const el = this.input?.input;
     if (!el) return;
-    try { window.focus(); } catch (_) {}
+    try { window.focus(); } catch (_) { }
     // mousedown 内で即座に focus() するとブラウザのデフォルト処理に負けることがある
     requestAnimationFrame(() => {
       // 一部環境ではさらに 1tick 遅らせると安定する
@@ -1051,14 +1064,6 @@ export class Editor {
         el.focus({ preventScroll: true });
       }, 0);
     });
-  }
-
-  enableInput() {
-    this.inputEnabled = true;
-  }
-
-  disableInput() {
-    this.inputEnabled = false;
   }
 
   sendNotification(method, args) {
@@ -1221,7 +1226,7 @@ export class Editor {
   }
 
   getClipboardText() {
-    navigator.clipboard.readText().then(text => {
+    navigator.clipboard?.readText().then(text => {
       this.jsonrpc.notify('got-clipboard-text', { text });
     });
   }
